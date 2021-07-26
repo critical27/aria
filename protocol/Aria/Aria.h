@@ -41,6 +41,7 @@ public:
       auto partitionId = writeKey.get_partition_id();
       auto table = db.find_table(tableId, partitionId);
 
+      // doodle: local/remote write
       if (partitioner.has_master_partition(partitionId)) {
         auto key = writeKey.get_key();
         auto value = writeKey.get_value();

@@ -148,12 +148,15 @@ public:
     // cannot use unsigned type in reverse iteration
     for (int i = int(readSet.size()) - 1; i >= 0; i--) {
       // early return
+      // doodle: 第二次进入就直接退出
       if (!readSet[i].get_read_request_bit()) {
         break;
       }
 
       AriaRWKey &readKey = readSet[i];
+      // doodle: 真正的执行读请求 local/remote read
       readRequestHandler(readKey, id, i);
+      // doodle: 发送完读请求之后置标志位 下次进来就直接退出
       readSet[i].clear_read_request_bit();
     }
 

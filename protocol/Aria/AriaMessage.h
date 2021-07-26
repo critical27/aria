@@ -26,6 +26,7 @@ enum class AriaMessage {
 
 class AriaMessageFactory {
 public:
+  // doodle: 读请求 下面同理
   static std::size_t new_search_message(Message &message, ITable &table,
                                         uint32_t tid, uint32_t tid_offset,
                                         const void *key, uint32_t key_offset) {
@@ -128,6 +129,7 @@ class AriaMessageHandler {
   using Transaction = AriaTransaction;
 
 public:
+  // doodle: 处理读请求
   static void
   search_request_handler(MessagePiece inputPiece, Message &responseMessage,
                          ITable &table,
@@ -185,6 +187,7 @@ public:
     responseMessage.flush();
   }
 
+  // doodle: 处理读resp
   static void
   search_response_handler(MessagePiece inputPiece, Message &responseMessage,
                           ITable &table,

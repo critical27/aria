@@ -91,6 +91,7 @@ public:
       read_snapshot();
       n_complete_workers.fetch_add(1);
       // wait to Aria_READ
+      // doodle: 处理reserve请求
       while (static_cast<ExecutorStatus>(worker_status.load()) ==
              ExecutorStatus::Aria_READ) {
         process_request();
@@ -107,6 +108,7 @@ public:
       commit_transactions();
       n_complete_workers.fetch_add(1);
       // wait to Aria_COMMIT
+      // doodle: 处理commit请求
       while (static_cast<ExecutorStatus>(worker_status.load()) ==
              ExecutorStatus::Aria_COMMIT) {
         process_request();
@@ -136,13 +138,16 @@ public:
     auto cur_epoch = epoch.load();
     auto n_abort = total_abort.load();
     std::size_t count = 0;
+    // doodle: round-robin将每个txn分配到worker
     for (auto i = id; i < transactions.size(); i += context.worker_num) {
 
+      // doodle: 暂时看不懂是在处理什么请求
       process_request();
 
       // if null, generate a new transaction, on this node.
       // else only reset the query
 
+      // doodle: 取事务
       if (transactions[i] == nullptr || i >= n_abort) {
         auto partition_id = get_partition_id();
         transactions[i] =
@@ -161,6 +166,8 @@ public:
       count++;
 
       // run transactions
+      // doodle: 第一次调用execute 只分析read set 并进行local/remote read
+      //         remote read会增加pendingResponses 在下面会等待remote read完成
       auto result = transactions[i]->execute(id);
       n_network_size.fetch_add(transactions[i]->network_size);
       if (result == TransactionResult::ABORT_NORETRY) {
@@ -184,15 +191,18 @@ public:
       count++;
 
       // wait till all reads are processed
+      // doodle: 等待remote read完成
       while (transactions[i]->pendingResponses > 0) {
         process_request();
       }
 
       transactions[i]->execution_phase = true;
       // fill in writes in write set
+      // doodle: 第二次调用exetue 分析write set
       transactions[i]->execute(id);
 
       // start reservation
+      // doodle: 发送read/write set reserve请求
       reserve_transaction(*transactions[i]);
       if (count % context.batch_flush == 0) {
         flush_messages();
@@ -330,6 +340,8 @@ public:
 
       count++;
 
+      // doodle: 分析事务依赖: waw/raw/war如果本地已经出现 置对应标记
+      //         否则发送检查冲突check的请求到其他分片
       analyze_dependency(*transactions[i]);
       if (count % context.batch_flush == 0) {
         flush_messages();
@@ -346,10 +358,12 @@ public:
       count++;
 
       // wait till all checks are processed
+      // doodle: 等待检查冲突的请求都处理完成
       while (transactions[i]->pendingResponses > 0) {
         process_request();
       }
 
+      // doodle: 只读事务
       if (context.aria_read_only_optmization &&
           transactions[i]->is_read_only()) {
         n_commit.fetch_add(1);
@@ -361,7 +375,9 @@ public:
         continue;
       }
 
+      // doodle: waw冲突
       if (transactions[i]->waw) {
+        // doodle: 对于aria来说 abort什么都不做 就是等下一个batch重试 见AriaManager::cleanup_batch
         protocol.abort(*transactions[i], messages);
         n_abort_lock.fetch_add(1);
         continue;
@@ -377,6 +393,7 @@ public:
         percentile.add(latency);
       } else {
         if (context.aria_reordering_optmization) {
+          // doodle: paper中的deterministic reordering
           if (transactions[i]->war == false || transactions[i]->raw == false) {
             protocol.commit(*transactions[i], messages);
             n_commit.fetch_add(1);
@@ -391,10 +408,12 @@ public:
             protocol.abort(*transactions[i], messages);
           }
         } else {
+          // doodle: paper的做法是会检查WAW和RAW
           if (transactions[i]->raw) {
             n_abort_lock.fetch_add(1);
             protocol.abort(*transactions[i], messages);
           } else {
+            // doodle: commit 执行local/remote write
             protocol.commit(*transactions[i], messages);
             n_commit.fetch_add(1);
             auto latency =
@@ -416,6 +435,7 @@ public:
 
   void setupHandlers(TransactionType &txn) {
 
+    // doodle: local/remote read
     txn.readRequestHandler = [this, &txn](AriaRWKey &readKey, std::size_t tid,
                                           uint32_t key_offset) {
       auto table_id = readKey.get_table_id();

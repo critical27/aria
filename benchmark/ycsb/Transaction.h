@@ -45,6 +45,7 @@ public:
 
     int ycsbTableID = ycsb::tableID;
 
+    // doodle: 分析read set
     for (auto i = 0u; i < keys_num; i++) {
       auto key = query.Y_KEY[i];
       storage.ycsb_keys[i].Y_KEY = key;
@@ -57,7 +58,9 @@ public:
       }
     }
 
+    // doodle: 执行local read, 发送remote read请求
     if (this->process_requests(worker_id)) {
+      // doodle: 对于AriaTransaction的第一阶段 在读完成后都是从整个地方退出 写是在最后commit阶段才写
       return TransactionResult::ABORT;
     }
 

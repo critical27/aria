@@ -84,6 +84,7 @@ public:
     // wait for all workers to finish
     while (n_completed_workers.load() < n_workers) {
       // change to nop_pause()?
+      // doodle: busy wait while not all ready
       std::this_thread::yield();
     }
   }
@@ -93,6 +94,7 @@ public:
     // wait for all workers to finish
     while (n_started_workers.load() < n_workers) {
       // change to nop_pause()?
+      // doodle: busy wait while not all ready
       std::this_thread::yield();
     }
   }

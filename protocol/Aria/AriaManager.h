@@ -55,9 +55,19 @@ public:
       epoch.fetch_add(1);
       cleanup_batch();
 
+      // doodle: coordinator AriaExecutor的状态转换
+      /*
+                 read_snapshot                              commit_transactions
+         READ ------------------> STOP ----------> COMMIT ---------------------> STOP
+          ^                                                                        |
+          |                                                                        |
+          +------------------------------------------------------------------------+
+      */
+
       // LOG(INFO) << "Seed: " << random.get_seed();
       n_started_workers.store(0);
       n_completed_workers.store(0);
+      // doodle: 在Aria_READ状态会不断调用process_request
       signal_worker(ExecutorStatus::Aria_READ);
       wait_all_workers_start();
       wait_all_workers_finish();

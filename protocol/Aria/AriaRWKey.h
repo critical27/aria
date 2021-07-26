@@ -87,8 +87,8 @@ private:
   /*
    * A bitvec is a 32-bit word.
    *
-   * [ table id (5) ] | partition id (16) | unused bit (9) |
-   * read request bit (1) | local index read (1)  ]
+   * [ table id (5) ] | partition id (16) | unused bit (9) | * read request bit (1) | local index read (1)  ]
+   *                                                         是否需要读                 是否是本地读索引 只在tpcc里又有
    *
    * local index read is set when the read is from a local read only index.
    */
