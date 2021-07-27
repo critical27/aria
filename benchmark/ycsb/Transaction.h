@@ -60,7 +60,7 @@ public:
 
     // doodle: 执行local read, 发送remote read请求
     if (this->process_requests(worker_id)) {
-      // doodle: 对于AriaTransaction的第一阶段 在读完成后都是从整个地方退出 写是在最后commit阶段才写
+      // doodle: 这个地方暂时还没看到会命中 所有process_requests几乎都是return false
       return TransactionResult::ABORT;
     }
 

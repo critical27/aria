@@ -99,6 +99,7 @@ public:
 
       n_started_workers.fetch_add(1);
       // we find active coord and relevant transactions
+      // doodle: 取事务 初始化事务状态
       generate_transactions();
       read_snapshot();
       n_complete_workers.fetch_add(1);
@@ -126,12 +127,15 @@ public:
       process_request();
       n_complete_workers.fetch_add(1);
 
+      // doodle: 分割线以上的和Aria基本都相同 下面是进入fallback strategy
+      // -----------------------------------------------------------------------
       // wait till AriaFB_Fallback_Prepare
       while (static_cast<ExecutorStatus>(worker_status.load()) !=
              ExecutorStatus::AriaFB_Fallback_Prepare) {
         std::this_thread::yield();
       }
       n_started_workers.fetch_add(1);
+      // doodle: 找到与自己相关 abort掉的事务 重新按fallback strategy执行
       prepare_calvin_input();
       n_complete_workers.fetch_add(1);
       // wait to AriaFB_COMMIT
@@ -204,6 +208,7 @@ public:
           transactions[i]->set_id(i + 1); // tid starts from 1
           transactions[i]->set_tid_offset(i);
           transactions[i]->execution_phase = false;
+          // doodle: 不止一个coordinator需要调用这个 最主要是需要调用analyze_transaction
           prepare_transaction(*transactions[i]);
           setupHandlers(*transactions[i]);
           transactions[i]->reset();
@@ -223,13 +228,17 @@ public:
 
   void prepare_transaction(TransactionType &txn) {
 
+    // doodle: 多个coordinator的时候 先分析read/write set
+    // 设置transaction::execute -> process_requests的相应处理函数
     txn.setup_process_requests_in_prepare_phase();
     // run execute to prepare read/write set
+    // doodle: 分析read set 和Aria不同 不执行local/remote read
     auto result = txn.execute(id);
     if (result == TransactionResult::ABORT_NORETRY) {
       txn.abort_no_retry = true;
     }
 
+    // doodle: 分析read set中各个节点需要读哪些数据
     analyze_transaction(txn);
   }
 
@@ -256,6 +265,7 @@ public:
   }
 
   void analyze_transaction(TransactionType &transaction) {
+    // doodle: 对read set中需要写的key 置为active 另外如果是本coordinator负责的置relevant
 
     // assuming no blind write
     auto &readSet = transaction.readSet;
@@ -271,6 +281,7 @@ public:
         continue;
       }
       auto partitionID = readkey.get_partition_id();
+      // doodle: 如果某个key需要进行update操作 找到负责这个key的coordinator 后续将读的结果发给对应节点
       if (readkey.get_write_lock_bit()) {
         active_coordinators[partitioner->master_coordinator(partitionID)] =
             true;
@@ -302,6 +313,7 @@ public:
       if (transactions[i]->relevant == false)
         continue;
 
+      // doodle: 暂时还没看到run_in_aria为false的场景
       if (transactions[i]->run_in_aria == false) {
         // read & write set are not ready
         bool abort = transactions[i]->abort_lock;
@@ -311,8 +323,10 @@ public:
         transactions[i]->execute(id);
       }
 
+      // doodle: 重置tid
       clear_metadata(*transactions[i]);
 
+      // doodle: read set此时没变
       analyze_transaction(*transactions[i]);
       // setup handlers for execution
       transactions[i]->setup_process_requests_in_fallback_phase(
@@ -324,6 +338,7 @@ public:
   void schedule_calvin_transactions() {
     // grant locks, once all locks are acquired, assign the transaction to
     // a worker thread in a round-robin manner.
+    // doodle: 和calvin paper一样的事务执行逻辑
     std::size_t request_id = 0;
     for (auto i = 0u; i < transactions.size(); i++) {
       // commit in aria
@@ -366,6 +381,7 @@ public:
         grant_lock = true;
         std::atomic<uint64_t> &tid = *(readKey.get_tid());
 
+        // doodle: 通过spin的形式cas tid 直到成功
         if (readKey.get_write_lock_bit()) {
           AriaFBHelper::write_lock(tid);
         } else if (readKey.get_read_lock_bit()) {
@@ -375,6 +391,7 @@ public:
         }
       }
       if (grant_lock) {
+        // doodle: 加入到执行队列
         auto worker = get_available_worker(request_id++);
         all_executors[worker]->transaction_queue.push(transactions[i].get());
       }
@@ -428,6 +445,7 @@ public:
       auto result = transaction->execute(id);
       n_network_size.fetch_add(transaction->network_size.load());
       if (result == TransactionResult::READY_TO_COMMIT) {
+        // doodle: 执行local write 释放锁
         protocol.calvin_commit(*transaction, lock_manager_id, n_lock_manager,
                                context.coordinator_num);
         auto latency =
@@ -449,6 +467,7 @@ public:
    * Node A runs, 0, 2, 4, 6, 8, 10
    * Node B runs, 1, 3, 5, 7, 9, 11
    *
+   * doodle: 这个地方是不是写错了 应该是0, 6
    * The first thread on Node A runs 0, 4
    * the second thread on Node A runs 2, 8
    */
@@ -467,6 +486,8 @@ public:
       count++;
 
       // run transactions
+      // doodle: 分析read set 进行local/remote read
+      // 在generate_transactions里面已经设置上了execute要执行的回调(setup_process_requests_in_execution_phase)
       auto result = transactions[i]->execute(id);
       n_network_size.fetch_add(transactions[i]->network_size);
       if (result == TransactionResult::ABORT_NORETRY) {
@@ -492,15 +513,18 @@ public:
       count++;
 
       // wait till all reads are processed
+      // doodle: 等待remote read完成
       while (transactions[i]->pendingResponses > 0) {
         process_request();
       }
 
       transactions[i]->execution_phase = true;
       // fill in writes in write set
+      // doodle: 分析write set
       transactions[i]->execute(id);
 
       // start reservation
+      // doodle: 发送read/write set reserve请求
       reserve_transaction(*transactions[i]);
       if (count % context.batch_flush == 0) {
         flush_messages();
@@ -630,6 +654,7 @@ public:
     }
   }
 
+  // doodle: commit_transactions和Aria一模一样
   void commit_transactions() {
     std::size_t count = 0;
     for (auto i = id; i < transactions.size(); i += context.worker_num) {
@@ -641,6 +666,8 @@ public:
 
       count++;
 
+      // doodle: 分析事务依赖: waw/raw/war如果本地已经出现 置对应标记
+      //         否则发送检查冲突check的请求到其他分片
       analyze_dependency(*transactions[i]);
       if (count % context.batch_flush == 0) {
         flush_messages();
@@ -675,6 +702,7 @@ public:
       }
 
       if (transactions[i]->waw) {
+        // doodle: abort只是标记下abort_lock 会在FB里重试 会把所有abort_tids发送给master coordinator
         protocol.abort(*transactions[i], messages);
         n_abort_lock.fetch_add(1);
         continue;
@@ -767,8 +795,10 @@ public:
                      uint32_t key_offset, const void *key, void *value) {
           auto *worker = this->all_executors[worker_id];
           if (worker->partitioner->has_master_partition(partition_id)) {
+            // doodle: 执行本地读
             ITable *table = worker->db.find_table(table_id, partition_id);
             AriaFBHelper::read(table->search(key), value, table->value_size());
+            // doodle: 这个key被其他coordinator需要 就发送给对应节点
             auto &active_coordinators = txn.active_coordinators;
             for (auto i = 0u; i < active_coordinators.size(); i++) {
               if (i == worker->coordinator_id || !active_coordinators[i])
@@ -778,6 +808,7 @@ public:
               txn.network_size.fetch_add(sz);
               txn.distributed_transaction = true;
             }
+            // doodle: local read完成
             txn.local_read.fetch_add(-1);
           }
         };

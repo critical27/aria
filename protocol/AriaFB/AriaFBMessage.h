@@ -490,6 +490,7 @@ public:
     AriaFBRWKey &readKey = txns[tid - 1]->readSet[key_offset];
     dec.read_n_bytes(readKey.get_value(), value_size);
 
+    // doodle: remote read完成 (是采取有这个数据的节点push的形式 发送的地方在calvin_read_handler里面)
     txns[tid - 1]->remote_read.fetch_add(-1);
   }
 

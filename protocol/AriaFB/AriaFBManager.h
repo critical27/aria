@@ -84,11 +84,14 @@ public:
       set_worker_status(ExecutorStatus::STOP);
       wait_all_workers_finish();
 
+      // doodle: 和Aria的区别
+      // -----------------------------------------------------------------------
       // clean batch now
       cleanup_batch();
       // wait for all machines until they finish the AriaFB_COMMIT phase.
       // this can be skipped
       // wait4_ack();
+      // doodle: 等待其他节点的abort txn
       wait4_abort_tids_from_non_master();
       broadcast_abort_tids();
 
@@ -120,6 +123,7 @@ public:
       wait_all_workers_finish();
       // wait for all machines until they finish the AriaFB_COMMIT phase.
       wait4_ack();
+      // -----------------------------------------------------------------------
     }
     signal_worker(ExecutorStatus::EXIT);
   }
@@ -169,10 +173,13 @@ public:
       set_worker_status(ExecutorStatus::STOP);
       wait_all_workers_finish();
 
+      // doodle: 和Aria的区别
+      // -----------------------------------------------------------------------
       // clean batch now
       cleanup_batch();
       // this can be skipped
       // send_ack();
+      // doodle: 发送abort txn给master coordinator
       send_abort_tids_to_master();
       wait4_abort_tids_from_master();
 
@@ -204,6 +211,7 @@ public:
       set_worker_status(ExecutorStatus::STOP);
       wait_all_workers_finish();
       send_ack();
+      // -----------------------------------------------------------------------
     }
   }
 

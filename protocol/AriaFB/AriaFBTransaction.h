@@ -211,6 +211,7 @@ public:
           }
         }
 
+        // doodle: 执行local/remote read
         AriaFB_read_handler(readKey, id, i);
         readSet[i].clear_read_request_bit();
       }
@@ -248,6 +249,8 @@ public:
         }
 
         auto &readKey = readSet[i];
+        // doodle: prepare阶段 如果这个key属于自己这个分片
+        // 那么先执行local read 同时检查这个key是否有其他节点也需要 如果有则以push的形式发送
         calvin_read_handler(worker_id, readKey.get_table_id(),
                             readKey.get_partition_id(), id, i,
                             readKey.get_key(), readKey.get_value());
@@ -260,6 +263,7 @@ public:
       if (active_coordinators[coordinator_id]) {
 
         // spin on local & remote read
+        // doodle: 等待local/remote read完成
         while (local_read.load() > 0 || remote_read.load() > 0) {
           // process remote reads for other workers
           remote_request_handler(worker_id);
@@ -295,6 +299,7 @@ public:
 
   bool abort_lock, abort_no_retry, abort_read_validation;
   bool distributed_transaction;
+  // doodle: relevant代表这个事务是否需要由某个coordinator负责
   bool relevant, run_in_aria;
   bool execution_phase;
   bool waw, war, raw;
